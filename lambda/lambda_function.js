@@ -1,108 +1,120 @@
-// lambda_function.js
+// In-memory storage for users
+let users = [];
+let idCounter = 1;
+
 exports.handler = async (event) => {
-    console.log("=== Incoming Event ===");
-    console.log(JSON.stringify(event, null, 2));
+    console.log("Received event:", JSON.stringify(event, null, 2));
+
+    const path = event.rawPath; // API Gateway path
+    const method = event.requestContext.http.method; // HTTP method
+    const body = event.body ? JSON.parse(event.body) : null;
+    let response;
 
     try {
-        // Detect HTTP method (GET or POST)
-        const method = event.requestContext?.http?.method || "UNKNOWN";
-        console.log(`HTTP Method: ${method}`);
-
-        // For GET requests — check query parameters
-        if (method === "GET") {
-            const queryParams = event.queryStringParameters || {};
-            console.log("Query Params:", queryParams);
-
-            const status = queryParams.status;
-
-            if (status === "400") {
-                console.warn("⚠️ Simulating Bad Request (400)");
-                return {
-                    statusCode: 400,
-                    body: JSON.stringify({ error: "Bad Request - 400 Error" }),
-                };
-            } else if (status === "500") {
-                console.error("💥 Simulating Internal Server Error (500)");
-                throw new Error("Simulated Internal Server Error");
-            }
-
-            // Default success response for GET
-            console.log("✅ GET request processed successfully");
-            return {
+        // Root path "/" returns hello
+        if (path === "/") {
+            response = {
                 statusCode: 200,
-                body: JSON.stringify({
-                    message: "Hello from Lambda (GET)",
-                    status: "success",
-                }),
+                body: JSON.stringify({ message: "Hello from Lambda!" })
             };
         }
+        // /user path handles CRUD
+        else if (path === "/user") {
+            switch (method) {
 
-        // For POST requests — handle body
-        if (method === "POST") {
-            console.log("Processing POST request...");
+                // CREATE
+                case "POST":
+                    if (!body || !body.name) {
+                        response = {
+                            statusCode: 400,
+                            body: JSON.stringify({ message: "Name is required" })
+                        };
+                        break;
+                    }
+                    const newUser = { id: idCounter++, name: body.name };
+                    users.push(newUser);
+                    response = {
+                        statusCode: 201,
+                        body: JSON.stringify({ message: "User created", user: newUser })
+                    };
+                    break;
 
-            let bodyData;
-            try {
-                bodyData = JSON.parse(event.body);
-            } catch (parseErr) {
-                console.error("❌ Invalid JSON body received:", parseErr.message);
-                return {
-                    statusCode: 400,
-                    body: JSON.stringify({
-                        error: "Invalid JSON format in request body",
-                        message: parseErr.message,
-                    }),
-                };
+                // READ
+                case "GET":
+                    response = {
+                        statusCode: 200,
+                        body: JSON.stringify({ users })
+                    };
+                    break;
+
+                // UPDATE
+                case "PUT":
+                    if (!body || !body.id || !body.name) {
+                        response = {
+                            statusCode: 400,
+                            body: JSON.stringify({ message: "id and name are required" })
+                        };
+                        break;
+                    }
+                    const userToUpdate = users.find(u => u.id === body.id);
+                    if (!userToUpdate) {
+                        response = {
+                            statusCode: 404,
+                            body: JSON.stringify({ message: "User not found" })
+                        };
+                        break;
+                    }
+                    userToUpdate.name = body.name;
+                    response = {
+                        statusCode: 200,
+                        body: JSON.stringify({ message: "User updated", user: userToUpdate })
+                    };
+                    break;
+
+                // DELETE
+                case "DELETE":
+                    if (!body || !body.id) {
+                        response = {
+                            statusCode: 400,
+                            body: JSON.stringify({ message: "id is required" })
+                        };
+                        break;
+                    }
+                    const index = users.findIndex(u => u.id === body.id);
+                    if (index === -1) {
+                        response = {
+                            statusCode: 404,
+                            body: JSON.stringify({ message: "User not found" })
+                        };
+                        break;
+                    }
+                    const deletedUser = users.splice(index, 1);
+                    response = {
+                        statusCode: 200,
+                        body: JSON.stringify({ message: "User deleted", user: deletedUser[0] })
+                    };
+                    break;
+
+                default:
+                    response = {
+                        statusCode: 405,
+                        body: JSON.stringify({ message: "Method not allowed" })
+                    };
             }
-
-            console.log("Received body:", bodyData);
-
-            // Example: Validate required field
-            if (!bodyData.name) {
-                console.warn("⚠️ Missing required field: name");
-                return {
-                    statusCode: 400,
-                    body: JSON.stringify({
-                        error: "Missing 'name' field in JSON body",
-                    }),
-                };
-            }
-
-            // Simulate random server error for testing
-            if (bodyData.name === "error") {
-                console.error("💥 Simulated 500 error triggered");
-                throw new Error("Forced internal error for testing");
-            }
-
-            // Success
-            console.log("✅ POST processed successfully");
-            return {
-                statusCode: 200,
-                body: JSON.stringify({
-                    message: "POST request processed successfully",
-                    receivedData: bodyData,
-                }),
+        } else {
+            response = {
+                statusCode: 404,
+                body: JSON.stringify({ message: "Route not found" })
             };
         }
-
-        // For unsupported methods
-        console.warn("⚠️ Unsupported HTTP method received");
-        return {
-            statusCode: 405,
-            body: JSON.stringify({
-                error: "Method Not Allowed",
-                allowedMethods: ["GET", "POST"],
-            }),
-        };
-    } catch (err) {
-        // Catch any unhandled errors
-        console.error("💣 Unhandled exception caught:", err.message);
-        return {
+    } catch (error) {
+        console.error("Error:", error);
+        response = {
             statusCode: 500,
-            body: JSON.stringify({
-                error: "Internal Server Error",
-                message: err.message,
-            }),
+            body: JSON.stringify({ message: "Internal server error", error: error.message })
         };
     }
+
+    console.log("Response:", JSON.stringify(response, null, 2));
+    return response;
 };
